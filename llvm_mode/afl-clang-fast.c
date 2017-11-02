@@ -130,6 +130,14 @@ static void edit_params(u32 argc, char** argv) {
   cc_params[cc_par_cnt++] = alloc_printf("%s/afl-llvm-pass.so", obj_path);
 #endif /* ^USE_TRACE_PC */
 
+  u8* fakecmp_dir = getenv("FAKECMP_DIR");
+  if (fakecmp_dir) {
+    cc_params[cc_par_cnt++] = "-Xclang";
+    cc_params[cc_par_cnt++] = "-load";
+    cc_params[cc_par_cnt++] = "-Xclang";
+    cc_params[cc_par_cnt++] = alloc_printf("%s/fakecmp-llvm-pass.so", fakecmp_dir);
+  }
+
   cc_params[cc_par_cnt++] = "-Qunused-arguments";
 
   /* Detect stray -v calls from ./configure scripts. */
@@ -213,7 +221,7 @@ static void edit_params(u32 argc, char** argv) {
 
   }
 
-  if (getenv("AFL_NO_BUILTIN")) {
+  if (getenv("AFL_NO_BUILTIN") || fakecmp_dir) {
 
     cc_params[cc_par_cnt++] = "-fno-builtin-strcmp";
     cc_params[cc_par_cnt++] = "-fno-builtin-strncmp";
@@ -282,10 +290,14 @@ static void edit_params(u32 argc, char** argv) {
 
       case 0:
         cc_params[cc_par_cnt++] = alloc_printf("%s/afl-llvm-rt.o", obj_path);
+        if (fakecmp_dir)
+          cc_params[cc_par_cnt++] = alloc_printf("%s/fakecmp.rt", fakecmp_dir);
         break;
 
       case 32:
         cc_params[cc_par_cnt++] = alloc_printf("%s/afl-llvm-rt-32.o", obj_path);
+        if (fakecmp_dir)
+          cc_params[cc_par_cnt++] = alloc_printf("%s/fakecmp32.rt", fakecmp_dir);
 
         if (access(cc_params[cc_par_cnt - 1], R_OK))
           FATAL("-m32 is not supported by your compiler");
@@ -294,6 +306,8 @@ static void edit_params(u32 argc, char** argv) {
 
       case 64:
         cc_params[cc_par_cnt++] = alloc_printf("%s/afl-llvm-rt-64.o", obj_path);
+        if (fakecmp_dir)
+          cc_params[cc_par_cnt++] = alloc_printf("%s/fakecmp64.rt", fakecmp_dir);
 
         if (access(cc_params[cc_par_cnt - 1], R_OK))
           FATAL("-m64 is not supported by your compiler");

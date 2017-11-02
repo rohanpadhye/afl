@@ -92,6 +92,8 @@ static u8 __tokencap_is_ro(const void* ptr) {
 
 }
 
+void __tokencap_init(void);
+
 
 /* Dump an interesting token to output file, quoting and escaping it
    properly. */
@@ -102,8 +104,9 @@ static void __tokencap_dump(const u8* ptr, size_t len, u8 is_text) {
   u32 i;
   u32 pos = 0;
 
-  if (len < MIN_AUTO_EXTRA || len > MAX_AUTO_EXTRA || !__tokencap_out_file)
-    return;
+  if (!__tokencap_out_file) __tokencap_init();
+
+  if (len < MIN_AUTO_EXTRA || len > MAX_AUTO_EXTRA) return;
 
   for (i = 0; i < len; i++) {
 
@@ -295,10 +298,11 @@ char* strcasestr(const char* haystack, const char* needle) {
 
 /* Init code to open the output file (or default to stderr). */
 
-__attribute__((constructor)) void __tokencap_init(void) {
+void __tokencap_init(void) {
 
   u8* fn = getenv("AFL_TOKEN_FILE");
-  if (fn) __tokencap_out_file = fopen(fn, "a");
+  if (!fn) fn = "afl_tokens.txt";
+  __tokencap_out_file = fopen(fn, "a");
   if (!__tokencap_out_file) __tokencap_out_file = stderr;
 
 }
