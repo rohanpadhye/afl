@@ -45,6 +45,7 @@
 #include <termios.h>
 #include <dlfcn.h>
 #include <sched.h>
+#include <libgen.h>
 
 #include <sys/wait.h>
 #include <sys/time.h>
@@ -85,11 +86,14 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *out_dir,                   /* Working & output directory       */
           *sync_dir,                  /* Synchronization directory        */
           *sync_id,                   /* Fuzzer ID                        */
+          *afl_dir,                   /* Directory where AFL is installed */
           *use_banner,                /* Display banner                   */
           *in_bitmap,                 /* Input bitmap                     */
           *doc_path,                  /* Path to documentation dir        */
           *target_path,               /* Path to target binary            */
-          *orig_cmdline;              /* Original command line            */
+          *orig_cmdline,              /* Original command line            */
+          *validation_script,         /* Script to validate an input      */
+          **validation_argv;          /* Args to validation script        */
 
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
 static u32 hang_tmout = EXEC_TIMEOUT; /* Timeout used for hang det (ms)   */
@@ -869,7 +873,8 @@ EXP_ST void read_bitmap(u8* fname) {
 /* Check if the current execution path brings anything new to the table.
    Update virgin bits to reflect the finds. Returns 1 if the only change is
    the hit-count for a particular tuple; 2 if there are new tuples seen. 
-   Updates the map, so subsequent calls will always return 0.
+   This version does not update the map. Call update_bits() after 
+   has_new_bits() in order to update the map.
 
    This function is called after every exec() on a fairly large buffer, so
    it needs to be fast. We do this in 32-bit and 64-bit flavors. */
@@ -928,7 +933,6 @@ static inline u8 has_new_bits(u8* virgin_map) {
 
       }
 
-      *virgin &= ~*current;
 
     }
 
@@ -943,6 +947,32 @@ static inline u8 has_new_bits(u8* virgin_map) {
 
 }
 
+/* Update the given virgin map by removing all bits that are
+   in the global trace_bits. */
+static inline void update_bits(u8* virgin_map) {
+
+#ifdef __x86_64__
+
+  u64* current = (u64*)trace_bits;
+  u64* virgin  = (u64*)virgin_map;
+
+  u32  i = (MAP_SIZE >> 3);
+
+#else
+
+  u32* current = (u32*)trace_bits;
+  u32* virgin  = (u32*)virgin_map;
+
+  u32  i = (MAP_SIZE >> 2);
+
+#endif /* ^__x86_64__ */
+
+  while (i--) {
+    *virgin &= ~*current;
+    current++;
+    virgin++;
+  }
+}
 
 /* Count the number of bits set in the provided bitmap. Used for the status
    screen several times every second, does not have to be fast. */
@@ -2521,6 +2551,89 @@ static void write_with_gap(void* mem, u32 len, u32 skip_at, u32 skip_len) {
 }
 
 
+static void create_validation_args(char** target_argv) {
+  // First count the number of program args
+  int target_argc = 0;
+  char** target_arg_ptr = target_argv;
+  while (*target_arg_ptr != NULL) {
+    target_argc++;
+    target_arg_ptr++;
+  }
+  // Validation args is (script) + (input) + (output) + (target + args)
+  int validation_argc = target_argc + 3;
+  // Allocate space for as many pointers + 1 for terminating null ptr
+  validation_argv = (u8**) ck_alloc((validation_argc + 1) * sizeof(char*));
+  // Copy target args to validation args
+  memcpy(&validation_argv[3], target_argv, target_argc * sizeof(char*));
+  // Set validation args
+  validation_argv[0] = validation_script;
+  validation_argv[1] = NULL; // Replace with input file
+  validation_argv[2] = "/tmp/ignore"; // TODO: remove this requirement
+}
+
+static int validate_input(char** target_argv) {
+  if (validation_script != NULL) {
+    if (out_file != NULL) {
+      PFATAL("AFL_VALIDATION_SCRIPT cannot be used on programs that do not read from STDIN");
+    }
+
+    u8* fn = alloc_printf("%s/.cur_input", out_dir);
+    validation_argv[1] = fn;
+
+/*
+    char** a = (char**) validation_argv;
+    while (*a != NULL) {
+      printf("%s ", *a);
+      a++;
+    }
+    printf("\n");
+    exit(0);
+*/
+
+    // Run the validation script using fork-and-exec
+    int script_pid = fork();
+    int status;
+
+    if (!script_pid) {
+      // In the child 
+      dup2(dev_null_fd, 1);
+      dup2(dev_null_fd, 2);
+
+      // TODO: Figure out why total_paths skyrockets when this is removed
+      exit(0);
+
+      // Execute validation script
+      execv(validation_script, (char**) validation_argv);
+
+      // Should not reach here
+      *(u32*)trace_bits = EXEC_FAIL_SIG;
+      exit(0);
+    } else {
+      // In AFL, check return status of validation script
+      waitpid(script_pid, &status, 0);
+      ck_free(fn);
+  
+      // Check health of validation script    
+      if (!WIFEXITED(status)) {
+        PFATAL("Validation script terminated abnormally");
+      }
+  
+      if (*(u32*)trace_bits == EXEC_FAIL_SIG) {
+        FATAL("Unable to execute validation script");
+      }
+      
+      // Validation script exits with 0 iff input is valid
+      if (WEXITSTATUS(status) == 0) {
+        return 1;
+      } else {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+
 static void show_stats(void);
 
 /* Calibrate a new test case. This is done when processing the input directory
@@ -2589,6 +2702,11 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
     if (q->exec_cksum != cksum) {
 
       u8 hnb = has_new_bits(virgin_bits);
+      if (validate_input(argv)) {
+        update_bits(virgin_bits);
+      } else {
+        hnb = 0;
+      }
       if (hnb > new_bits) new_bits = hnb;
 
       if (q->exec_cksum) {
@@ -3108,7 +3226,6 @@ static void write_crash_readme(void) {
 
 }
 
-
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
    entry is saved, 0 otherwise. */
@@ -3125,10 +3242,13 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
 
-    if (!(hnb = has_new_bits(virgin_bits))) {
+    if (!(hnb = has_new_bits(virgin_bits)) || !validate_input(argv)) {
       if (crash_mode) total_crashes++;
       return 0;
     }    
+    
+    /* New bits found; update the virgin bit map. */
+    update_bits(virgin_bits);
 
 #ifndef SIMPLE_FILES
 
@@ -3188,7 +3308,9 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
         simplify_trace((u32*)trace_bits);
 #endif /* ^__x86_64__ */
 
-        if (!has_new_bits(virgin_tmout)) return keeping;
+        if (!has_new_bits(virgin_tmout) || !validate_input(argv)) return keeping;
+        
+        update_bits(virgin_tmout);
 
       }
 
@@ -3252,7 +3374,9 @@ keep_as_crash:
         simplify_trace((u32*)trace_bits);
 #endif /* ^__x86_64__ */
 
-        if (!has_new_bits(virgin_crash)) return keeping;
+        if (!has_new_bits(virgin_crash) || !validate_input(argv)) return keeping;
+
+        update_bits(virgin_crash);
 
       }
 
@@ -7900,6 +8024,11 @@ int main(int argc, char** argv) {
     if (qemu_mode)  FATAL("-Q and -n are mutually exclusive");
 
   }
+  
+  afl_dir = dirname(argv[0]);
+  setenv("AFL_DIR", afl_dir, 1);
+  
+  validation_script = getenv("AFL_VALIDATION_SCRIPT");
 
   if (getenv("AFL_NO_FORKSRV"))    no_forkserver    = 1;
   if (getenv("AFL_NO_CPU_RED"))    no_cpu_meter_red = 1;
@@ -7922,6 +8051,7 @@ int main(int argc, char** argv) {
 
   if (getenv("AFL_LD_PRELOAD"))
     FATAL("Use AFL_PRELOAD instead of AFL_LD_PRELOAD");
+
 
   save_cmdline(argc, argv);
 
@@ -7964,6 +8094,11 @@ int main(int argc, char** argv) {
     use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
   else
     use_argv = argv + optind;
+  
+  
+  if (validation_script != NULL) {
+    create_validation_args(use_argv);
+  }
 
   perform_dry_run(use_argv);
 
