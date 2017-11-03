@@ -2559,16 +2559,15 @@ static void create_validation_args(char** target_argv) {
     target_argc++;
     target_arg_ptr++;
   }
-  // Validation args is (script) + (input) + (output) + (target + args)
-  int validation_argc = target_argc + 3;
+  // Validation args is (script) + (input) + (target + args)
+  int validation_argc = target_argc + 2;
   // Allocate space for as many pointers + 1 for terminating null ptr
   validation_argv = (u8**) ck_alloc((validation_argc + 1) * sizeof(char*));
   // Copy target args to validation args
-  memcpy(&validation_argv[3], target_argv, target_argc * sizeof(char*));
+  memcpy(&validation_argv[2], target_argv, target_argc * sizeof(char*));
   // Set validation args
   validation_argv[0] = validation_script;
   validation_argv[1] = NULL; // Replace with input file
-  validation_argv[2] = "/tmp/ignore"; // TODO: remove this requirement
   validation_argv[validation_argc] = NULL; // Null-terminated list
 }
 
