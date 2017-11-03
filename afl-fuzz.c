@@ -2569,6 +2569,7 @@ static void create_validation_args(char** target_argv) {
   validation_argv[0] = validation_script;
   validation_argv[1] = NULL; // Replace with input file
   validation_argv[2] = "/tmp/ignore"; // TODO: remove this requirement
+  validation_argv[validation_argc] = NULL; // Null-terminated list
 }
 
 static int validate_input(char** target_argv) {
@@ -2589,6 +2590,10 @@ static int validate_input(char** target_argv) {
     printf("\n");
     exit(0);
 */
+    // Remember the SHM_ID and unset it so that the validation script
+    // can run the target program in standalone mode (i.e. not as fuzz target)
+    char* shm_id = getenv(SHM_ENV_VAR);
+    unsetenv(SHM_ENV_VAR);
 
     // Run the validation script using fork-and-exec
     int script_pid = fork();
@@ -2599,9 +2604,6 @@ static int validate_input(char** target_argv) {
       dup2(dev_null_fd, 1);
       dup2(dev_null_fd, 2);
 
-      // TODO: Figure out why total_paths skyrockets when this is removed
-      exit(0);
-
       // Execute validation script
       execv(validation_script, (char**) validation_argv);
 
@@ -2611,7 +2613,10 @@ static int validate_input(char** target_argv) {
     } else {
       // In AFL, check return status of validation script
       waitpid(script_pid, &status, 0);
+
+      // Free resources and restore the SHM_ID
       ck_free(fn);
+      setenv(SHM_ENV_VAR, shm_id, 1);
   
       // Check health of validation script    
       if (!WIFEXITED(status)) {
