@@ -57,6 +57,14 @@ namespace {
 
   };
 
+  class ExecutionIndexing : public ModulePass {
+    public:
+      static char ID;
+      ExecutionIndexing() : ModulePass(ID) { }
+      bool runOnModule(Module &M) override;
+  };
+
+
 }
 
 
@@ -183,3 +191,54 @@ static RegisterStandardPasses RegisterAFLPass(
 
 static RegisterStandardPasses RegisterAFLPass0(
     PassManagerBuilder::EP_EnabledOnOptLevel0, registerAFLPass);
+
+
+static void registerEIPass(const PassManagerBuilder &,
+                            legacy::PassManagerBase &PM) {
+  PM.add(new ExecutionIndexing());
+}
+
+
+static RegisterStandardPasses RegisterEIPass(
+    PassManagerBuilder::EP_ModuleOptimizerEarly, registerEIPass);
+
+char ExecutionIndexing::ID = 0;
+
+bool ExecutionIndexing::runOnModule(Module& M) {
+  LLVMContext &C = M.getContext();
+
+  IntegerType *Int32Ty = IntegerType::getInt32Ty(C);
+  Type *VoidTy = Type::getVoidTy(C);
+  
+  Function* EIPushCallFunc = Function::Create(FunctionType::get(VoidTy,
+      ArrayRef<Type*>({Int32Ty}), false), GlobalVariable::ExternalLinkage,
+      "__afl_ei_push_call", &M);
+  
+  Function* EIPopReturnFunc = Function::Create(FunctionType::get(VoidTy,
+      false), GlobalVariable::ExternalLinkage,
+      "__afl_ei_pop_return", &M);
+  
+  for (auto &F : M) {
+    for (auto &BB : F) {
+      IRBuilder<> IRB(&BB);
+      for (auto it = BB.begin(); it != BB.end(); it++) {
+        /* Instrument all call instructions */
+        if (isa<CallInst>(*it)) {
+          
+          /* Insert call to push onto execution indexing stack */
+          unsigned int call_site_id = AFL_R(MAP_SIZE);
+          ConstantInt* CallSiteId = ConstantInt::get(Int32Ty, call_site_id);
+          IRB.SetInsertPoint(&BB, it);
+          IRB.CreateCall(EIPushCallFunc, ArrayRef<Value*>({CallSiteId}));
+          
+          /* Insert call to pop from execution indexing stack */
+          IRB.SetInsertPoint(&BB, ++it); // Increment `it` to get post-call point
+          IRB.CreateCall(EIPopReturnFunc);
+        }
+      }
+    }
+  }
+
+  return true;
+
+}

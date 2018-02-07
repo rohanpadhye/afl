@@ -304,3 +304,76 @@ void __sanitizer_cov_trace_pc_guard_init(uint32_t* start, uint32_t* stop) {
   }
 
 }
+
+
+/**** Execution Indexing logic ****/
+typedef struct ei_frame_t {
+  int iid;
+  int count;
+} ei_frame;
+
+const int EI_MAX_DEPTH = 64;
+const int EI_COUNTER_SIZE = MAP_SIZE;
+
+__thread int      ei_depth = 0;
+__thread ei_frame ei_frames[EI_MAX_DEPTH];
+__thread int      ei_counters[EI_MAX_DEPTH][EI_COUNTER_SIZE];
+
+void __afl_ei_push_call(int iid) {
+  // Invariant
+  assert(ei_depth >= 0 && ei_depth < EI_MAX_DEPTH);
+
+  // Ensure that IID is within range
+  iid = iid % EI_COUNTER_SIZE;
+
+  // Increment counter for call site
+  int count = ++ei_counters[ei_depth][iid];
+
+  // Add to rolling index
+  ei_frames[ei_depth].iid = iid;
+  ei_frames[ei_depth].count = count; 
+
+  // Increment depth
+  ei_depth++;
+
+  // Ensure that we do not go out of bounds;
+  // Overflow is handled by wrapping around
+  ei_depth = ei_depth % EI_MAX_DEPTH;
+  
+  // Invariant
+  assert(ei_depth >= 0 && ei_depth < EI_MAX_DEPTH);
+} 
+
+void __afl_ei_pop_return() {  
+  // Invariant
+  assert(ei_depth >= 0 && ei_depth < EI_MAX_DEPTH);
+  
+  // Clean top of stack
+  memset(ei_counters[ei_depth], 0, EI_COUNTER_SIZE*sizeof(int)); 
+  
+  // Decrement depth
+  ei_depth--;
+
+  // Underflow is handled by wrapping around
+  if (ei_depth < 0) {
+    ei_depth += EI_MAX_DEPTH;
+  }
+    
+  // Invariant
+  assert(ei_depth >= 0 && ei_depth < EI_MAX_DEPTH);
+
+}
+
+void __afl_ei_print_execution_index() {
+  // Invariant
+  assert(ei_depth >= 0 && ei_depth < EI_MAX_DEPTH);
+  
+  // Print EI
+  printf("[ ");
+  for (int i = 0; i < ei_depth; i++) {
+    printf("%d:%d; ", ei_frames[i].iid, ei_frames[i].count);
+  }
+  printf("]\n");
+
+
+}
