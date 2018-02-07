@@ -309,6 +309,7 @@ void __sanitizer_cov_trace_pc_guard_init(uint32_t* start, uint32_t* stop) {
 /**** Execution Indexing logic ****/
 typedef struct ei_frame_t {
   int iid;
+  char* name;
   int count;
 } ei_frame;
 
@@ -319,7 +320,7 @@ __thread int      ei_depth = 0;
 __thread ei_frame ei_frames[EI_MAX_DEPTH];
 __thread int      ei_counters[EI_MAX_DEPTH][EI_COUNTER_SIZE];
 
-void __afl_ei_push_call(int iid) {
+void __afl_ei_push_call(int iid, char* name) {
   // Invariant
   assert(ei_depth >= 0 && ei_depth < EI_MAX_DEPTH);
 
@@ -331,6 +332,7 @@ void __afl_ei_push_call(int iid) {
 
   // Add to rolling index
   ei_frames[ei_depth].iid = iid;
+  ei_frames[ei_depth].name = name ? name : "<unknown>";
   ei_frames[ei_depth].count = count; 
 
   // Increment depth
@@ -371,7 +373,7 @@ void __afl_ei_print_execution_index() {
   // Print EI
   printf("[ ");
   for (int i = 0; i < ei_depth; i++) {
-    printf("%d:%d; ", ei_frames[i].iid, ei_frames[i].count);
+    printf("%s:%d; ", ei_frames[i].name, ei_frames[i].count);
   }
   printf("]\n");
 

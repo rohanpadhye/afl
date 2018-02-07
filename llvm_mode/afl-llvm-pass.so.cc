@@ -207,12 +207,15 @@ char ExecutionIndexing::ID = 0;
 bool ExecutionIndexing::runOnModule(Module& M) {
   LLVMContext &C = M.getContext();
 
+  IntegerType *Int8Ty  = IntegerType::getInt8Ty(C);
   IntegerType *Int32Ty = IntegerType::getInt32Ty(C);
   Type *VoidTy = Type::getVoidTy(C);
+  PointerType *CharPtrTy = PointerType::getUnqual(Int8Ty);
+  Constant *NullCharPtr = ConstantPointerNull::get(CharPtrTy);
   
   Function* EIPushCallFunc = Function::Create(FunctionType::get(VoidTy,
-      ArrayRef<Type*>({Int32Ty}), false), GlobalVariable::ExternalLinkage,
-      "__afl_ei_push_call", &M);
+      ArrayRef<Type*>({Int32Ty, CharPtrTy}), false), 
+      GlobalVariable::ExternalLinkage, "__afl_ei_push_call", &M);
   
   Function* EIPopReturnFunc = Function::Create(FunctionType::get(VoidTy,
       false), GlobalVariable::ExternalLinkage,
@@ -233,12 +236,16 @@ bool ExecutionIndexing::runOnModule(Module& M) {
         /* Instrument all call instructions */
         if (auto Call = dyn_cast<CallInst>(&Insn)) { 
           // This could have been done with InstVisitor#visitCallInst()
+          Function* CalledFunc = Call->getCalledFunction();
           
+
           /* Insert call to push onto execution indexing stack */
           unsigned int call_site_id = AFL_R(MAP_SIZE);
           ConstantInt* CallSiteId = ConstantInt::get(Int32Ty, call_site_id);
+          Value* CalledFuncName = (CalledFunc && CalledFunc->hasName()) ? 
+            IRB.CreateGlobalStringPtr(CalledFunc->getName()) : NullCharPtr;
           IRB.SetInsertPoint(&BB, it);
-          IRB.CreateCall(EIPushCallFunc, ArrayRef<Value*>({CallSiteId}));
+          IRB.CreateCall(EIPushCallFunc, ArrayRef<Value*>({CallSiteId, CalledFuncName}));
 
           /* Replace calls to fread() with ei_fread() */
           if (FRead != NULL && FRead == Call->getCalledFunction()) {
