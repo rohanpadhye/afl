@@ -313,7 +313,7 @@ typedef struct ei_frame_t {
 } ei_frame;
 
 const int EI_MAX_DEPTH = 64;
-const int EI_COUNTER_SIZE = MAP_SIZE;
+const int EI_COUNTER_SIZE = 1024;
 
 __thread int      ei_depth = 0;
 __thread ei_frame ei_frames[EI_MAX_DEPTH];
@@ -375,5 +375,10 @@ void __afl_ei_print_execution_index() {
   }
   printf("]\n");
 
+}
 
+size_t __afl_ei_fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  size_t nbytes = fread(ptr, size, nmemb, stream);
+  __afl_ei_print_execution_index();
+  return nbytes;
 }

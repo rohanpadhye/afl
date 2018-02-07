@@ -200,7 +200,7 @@ static void registerEIPass(const PassManagerBuilder &,
 
 
 static RegisterStandardPasses RegisterEIPass(
-    PassManagerBuilder::EP_ModuleOptimizerEarly, registerEIPass);
+    PassManagerBuilder::EP_OptimizerLast, registerEIPass);
 
 char ExecutionIndexing::ID = 0;
 
@@ -217,23 +217,51 @@ bool ExecutionIndexing::runOnModule(Module& M) {
   Function* EIPopReturnFunc = Function::Create(FunctionType::get(VoidTy,
       false), GlobalVariable::ExternalLinkage,
       "__afl_ei_pop_return", &M);
+
+  Function* FRead = M.getFunction("fread");
+  Function* WrappedFRead = FRead == NULL ? NULL :
+    Function::Create(FRead->getFunctionType(), GlobalValue::ExternalLinkage,
+        "__afl_ei_fread", &M);
   
   for (auto &F : M) {
     for (auto &BB : F) {
       IRBuilder<> IRB(&BB);
-      for (auto it = BB.begin(); it != BB.end(); it++) {
+      // Use a while-loop because we may erase from iterators
+      auto it = BB.begin();
+      while (it != BB.end()) {
+        Instruction& Insn = *it;
         /* Instrument all call instructions */
-        if (isa<CallInst>(*it)) {
+        if (auto Call = dyn_cast<CallInst>(&Insn)) { 
+          // This could have been done with InstVisitor#visitCallInst()
           
           /* Insert call to push onto execution indexing stack */
           unsigned int call_site_id = AFL_R(MAP_SIZE);
           ConstantInt* CallSiteId = ConstantInt::get(Int32Ty, call_site_id);
           IRB.SetInsertPoint(&BB, it);
           IRB.CreateCall(EIPushCallFunc, ArrayRef<Value*>({CallSiteId}));
+
+          /* Replace calls to fread() with ei_fread() */
+          if (FRead != NULL && FRead == Call->getCalledFunction()) {
+            // First get all the args
+            std::vector<Value*> args;
+            for (auto &arg : Call->arg_operands()) {
+              args.push_back(arg);
+            }
+            // Create a call to the wrapped fread()
+            CallInst* WrappedCall = IRB.CreateCall(WrappedFRead, ArrayRef<Value*>(args));
+            // Replace uses of the return value (nbytes) to the new return value
+            Call->replaceAllUsesWith(WrappedCall);
+            // Remove the original call to avoid duplicate calls to fread()
+            it = Call->eraseFromParent();
+          } else {
+            it++; // Only increment if we do not delete the Call
+          }
           
           /* Insert call to pop from execution indexing stack */
-          IRB.SetInsertPoint(&BB, ++it); // Increment `it` to get post-call point
+          IRB.SetInsertPoint(&BB, it); // `it` now points after the original call
           IRB.CreateCall(EIPopReturnFunc);
+        } else {
+          it++; // For non-call instructions, just keep moving
         }
       }
     }
