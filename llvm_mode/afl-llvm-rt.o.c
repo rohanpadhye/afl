@@ -59,6 +59,9 @@ __thread u32 __afl_prev_loc;
 
 static u8 is_persistent;
 
+/* Using buffered input? */
+static u8 force_unbuf;
+
 
 /* SHM setup. */
 
@@ -85,6 +88,12 @@ static void __afl_map_shm(void) {
 
     __afl_area_ptr[0] = 1;
 
+  }
+
+  if (getenv("FORCE_UNBUF")) {
+    force_unbuf = 1;
+  } else {
+    force_unbuf = 0;
   }
 
 }
@@ -332,7 +341,7 @@ void __afl_ei_push_call(int iid, char* name) {
 
   // Add to rolling index
   ei_frames[ei_depth].iid = iid;
-  ei_frames[ei_depth].name = name ? name : "<unknown>";
+  ei_frames[ei_depth].name = name;
   ei_frames[ei_depth].count = count; 
 
   // Increment depth
@@ -373,14 +382,33 @@ void __afl_ei_print_execution_index() {
   // Print EI
   printf("[ ");
   for (int i = 0; i < ei_depth; i++) {
-    printf("%s:%d; ", ei_frames[i].name, ei_frames[i].count);
+    if (ei_frames[i].name) {
+      printf("%s:%d; ", ei_frames[i].name, ei_frames[i].count);
+    } else {
+      printf("<%d>:%d; ", ei_frames[i].iid, ei_frames[i].count);
+    }
   }
   printf("]\n");
 
 }
 
 size_t __afl_ei_fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  // Get offset
+  long offset = ftell(stream);
+  if (offset < 0)
+    offset = 0;
+
+  // Force reading of only one data item
+  if (force_unbuf) {
+    nmemb = 1;
+  }
+  
+  // Read actual bytes
   size_t nbytes = fread(ptr, size, nmemb, stream);
+  
+  // Print info
+  printf("%3ld: Read %3d bytes at ", offset, nbytes);
   __afl_ei_print_execution_index();
+
   return nbytes;
 }
