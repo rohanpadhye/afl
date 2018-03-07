@@ -139,11 +139,11 @@
 
 /* Maximum size of input file, in bytes (keep under 100MB): */
 
-#define MAX_FILE            (1 * 1024 * 1024)
+#define MAX_FILE            (1 * 1024)
 
 /* The same, for the test case minimizer: */
 
-#define TMIN_MAX_FILE       (10 * 1024 * 1024)
+#define TMIN_MAX_FILE       (10 * 1024)
 
 /* Block normalization steps for afl-tmin: */
 
