@@ -1,0 +1,67 @@
+--- ../../afl-2.26b/llvm_mode/Makefile	2016-08-14 08:49:23.904129603 +0200
++++ Makefile	2016-08-08 20:22:55.529015096 +0200
+@@ -54,11 +54,13 @@
+   CXX        = clang++
+ endif
+ 
++# laf
+ ifndef AFL_TRACE_PC
+-  PROGS      = ../afl-clang-fast ../afl-llvm-pass.so ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o
++  PROGS      = ../afl-clang-fast ../afl-llvm-pass.so ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o ../compare-transform-pass.so ../split-compares-pass.so ../split-switches-pass.so
+ else
+-  PROGS      = ../afl-clang-fast ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o
++  PROGS      = ../afl-clang-fast ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o ../compare-transform-pass.so ../split-compares-pass.so ../split-switches-pass.so
+ endif
++# /laf
+ 
+ all: test_deps $(PROGS) test_build all_done
+ 
+@@ -82,6 +84,16 @@
+ ../afl-llvm-pass.so: afl-llvm-pass.so.cc | test_deps
+ 	$(CXX) $(CLANG_CFL) -shared $< -o $@ $(CLANG_LFL)
+ 
++# laf
++../split-switches-pass.so: split-switches-pass.so.cc | test_deps
++	$(CXX) $(CLANG_CFL) -shared $< -o $@ $(CLANG_LFL)
++../compare-transform-pass.so: compare-transform-pass.so.cc | test_deps
++	$(CXX) $(CLANG_CFL) -shared $< -o $@ $(CLANG_LFL)
++../split-compares-pass.so: split-compares-pass.so.cc | test_deps
++	$(CXX) $(CLANG_CFL) -shared $< -o $@ $(CLANG_LFL)
++
++# /laf
++
+ ../afl-llvm-rt.o: afl-llvm-rt.o.c | test_deps
+ 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+ 
+--- ../../afl-2.26b/llvm_mode/afl-clang-fast.c	2016-08-14 08:49:23.904129603 +0200
++++ afl-clang-fast.c	2016-08-05 23:05:57.731047602 +0200
+@@ -119,6 +119,29 @@
+ 
+      http://clang.llvm.org/docs/SanitizerCoverage.html#tracing-pcs */
+ 
++  // laf
++  if (getenv("LAF_SPLIT_SWITCHES")) {
++    cc_params[cc_par_cnt++] = "-Xclang";
++    cc_params[cc_par_cnt++] = "-load";
++    cc_params[cc_par_cnt++] = "-Xclang";
++    cc_params[cc_par_cnt++] = alloc_printf("%s/split-switches-pass.so", obj_path);
++  }
++
++  if (getenv("LAF_TRANSFORM_COMPARES")) {
++    cc_params[cc_par_cnt++] = "-Xclang";
++    cc_params[cc_par_cnt++] = "-load";
++    cc_params[cc_par_cnt++] = "-Xclang";
++    cc_params[cc_par_cnt++] = alloc_printf("%s/compare-transform-pass.so", obj_path);
++  }
++
++  if (getenv("LAF_SPLIT_COMPARES")) {
++    cc_params[cc_par_cnt++] = "-Xclang";
++    cc_params[cc_par_cnt++] = "-load";
++    cc_params[cc_par_cnt++] = "-Xclang";
++    cc_params[cc_par_cnt++] = alloc_printf("%s/split-compares-pass.so", obj_path);
++  }
++  // /laf
++
+ #ifdef USE_TRACE_PC
+   cc_params[cc_par_cnt++] = "-fsanitize-coverage=bb,trace-pc";
+ #else

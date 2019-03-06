@@ -1,0 +1,18 @@
+--- Makefile	2016-08-14 08:49:23.904129603 +0200
++++ Makefile	2016-08-08 20:22:55.529015096 +0200
+@@ -54,11 +54,13 @@
+   CXX        = clang++
+ endif
+ 
++# laf
+ ifndef AFL_TRACE_PC
+-  PROGS      = ../afl-clang-fast ../afl-llvm-pass.so ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o
++  PROGS      = ../afl-clang-fast ../afl-llvm-pass.so ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o ../compare-transform-pass.so ../split-compares-pass.so ../split-switches-pass.so
+ else
+-  PROGS      = ../afl-clang-fast ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o
++  PROGS      = ../afl-clang-fast ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o ../compare-transform-pass.so ../split-compares-pass.so ../split-switches-pass.so
+ endif
++# /laf
+ 
+ all: test_deps $(PROGS) test_build all_done
+ 
